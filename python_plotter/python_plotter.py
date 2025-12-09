@@ -87,7 +87,7 @@ class Figure:
 <body>
     <div id="title">__TITLE__</div>
     <div id="controls">
-        Mouse: Drag to rotate | Wheel: Zoom
+        Mouse: Drag to rotate | Wheel: Zoom | Click: Select cube
     </div>
     <div id="container"></div>
 
@@ -111,11 +111,56 @@ class Figure:
         let cameraAngleY = 0;
         let cameraDistance = 10;
         
+        // Raycaster for click detection
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        
+        // Store all clickable objects
+        const clickableObjects = [];
+        
         renderer.domElement.addEventListener('mousedown', function(e) {
             isMouseDown = true;
             mouseX = e.clientX;
             mouseY = e.clientY;
         });
+        
+        document.addEventListener('mouseup', function(e) {
+            if (isMouseDown && Math.abs(e.clientX - mouseX) < 5 && Math.abs(e.clientY - mouseY) < 5) {
+                // This was a click, not a drag
+                handleClick(e);
+            }
+            isMouseDown = false;
+        });
+        
+        function handleClick(event) {
+            // Calculate mouse position in normalized device coordinates
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            // Update the raycaster
+            raycaster.setFromCamera(mouse, camera);
+            
+            // Find intersected objects
+            const intersects = raycaster.intersectObjects(clickableObjects);
+            
+            if (intersects.length > 0) {
+                const clickedObject = intersects[0].object;
+                if (clickedObject.userData.id) {
+                    console.log('Clicked cube ID:', clickedObject.userData.id);
+                    console.log('Cube object:', clickedObject);
+                    
+                    // Optional: Highlight the clicked cube
+                    if (window.lastClickedCube) {
+                        window.lastClickedCube.material.emissive.setHex(0x000000);
+                    }
+                    clickedObject.material.emissive.setHex(0x444444);
+                    window.lastClickedCube = clickedObject;
+                } else {
+                    console.log('Clicked object has no ID');
+                }
+            }
+        }
         
         document.addEventListener('mouseup', function() {
             isMouseDown = false;
@@ -163,6 +208,53 @@ class Figure:
         
         // Add traces
         __TRACES__
+        
+        // Helper function to get cube by ID
+        window.getCube = function(id) {
+            if (window.cubes && window.cubes[id]) {
+                return window.cubes[id];
+            }
+            console.log('Cube with ID "' + id + '" not found. Available cubes:', Object.keys(window.cubes || {}));
+            return null;
+        };
+        
+        // Helper function to list all cube IDs
+        window.listCubes = function() {
+            if (window.cubes) {
+                console.log('Available cube IDs:', Object.keys(window.cubes));
+                return Object.keys(window.cubes);
+            } else {
+                console.log('No cubes found');
+                return [];
+            }
+        };
+        
+        // Helper function to get cube info
+        window.getCubeInfo = function(id) {
+            const cube = window.getCube(id);
+            if (cube) {
+                return {
+                    id: cube.userData.id,
+                    position: cube.position,
+                    color: '#' + cube.material.color.getHexString(),
+                    visible: cube.visible
+                };
+            }
+            return null;
+        };
+        
+        // Helper function to highlight a cube
+        window.highlightCube = function(id) {
+            const cube = window.getCube(id);
+            if (cube) {
+                if (window.lastClickedCube) {
+                    window.lastClickedCube.material.emissive.setHex(0x000000);
+                }
+                cube.material.emissive.setHex(0x444444);
+                window.lastClickedCube = cube;
+                console.log('Highlighted cube:', id);
+            }
+        };
         
         // Position camera
         updateCameraPosition();
@@ -242,7 +334,8 @@ class Cube:
                  size: float = 1,
                  color: str = '#4ecdc4',
                  wireframe: bool = False,
-                 name: str = ""):
+                 name: str = "",
+                 id: str = ""):
         self.x = x
         self.y = y
         self.z = z
@@ -250,23 +343,41 @@ class Cube:
         self.color = color
         self.wireframe = wireframe
         self.name = name
+        self.cube_id = id
     
     def generate_js(self) -> str:
         """Generate JavaScript code for this trace."""
         wireframe_prop = "true" if self.wireframe else "false"
         trace_id = str(id(self))
+        cube_var_name = f"cube_{trace_id}"
         
-        return f'''
+        # Create the cube JavaScript code
+        js_code = f'''
         // {self.name or 'Cube trace'}
         const geometry_{trace_id} = new THREE.BoxGeometry({self.size}, {self.size}, {self.size});
         const material_{trace_id} = new THREE.MeshBasicMaterial({{ 
             color: '{self.color}',
             wireframe: {wireframe_prop}
         }});
-        const cube_{trace_id} = new THREE.Mesh(geometry_{trace_id}, material_{trace_id});
-        cube_{trace_id}.position.set({self.x}, {self.y}, {self.z});
-        scene.add(cube_{trace_id});
-        '''
+        const {cube_var_name} = new THREE.Mesh(geometry_{trace_id}, material_{trace_id});
+        {cube_var_name}.position.set({self.x}, {self.y}, {self.z});
+        scene.add({cube_var_name});
+        
+        // Add to clickable objects
+        clickableObjects.push({cube_var_name});'''
+        
+        # If an ID is provided, make it globally accessible
+        if self.cube_id:
+            js_code += f'''
+        
+        // Make cube globally accessible with ID
+        if (typeof window.cubes === 'undefined') {{
+            window.cubes = {{}};
+        }}
+        window.cubes['{self.cube_id}'] = {cube_var_name};
+        {cube_var_name}.userData.id = '{self.cube_id}';'''
+        
+        return js_code
 
 
 def visualiser(x: Optional[List[float]] = None, 
