@@ -3,7 +3,9 @@
 import webbrowser
 import tempfile
 import os
+import subprocess
 from typing import List, Optional
+from pathlib import Path
 
 
 class Figure:
@@ -415,3 +417,51 @@ def visualiser(x: Optional[List[float]] = None,
         fig.add_trace(trace)
     
     return fig
+
+
+def build_from_js_repo_and_show(repo_path):
+    """Build a the JavaScript repository into a browser ready index.html"""
+    
+    # Change to the JS repo directory
+    original_dir = os.getcwd()
+    repo = Path(repo_path)
+    os.chdir(repo_path)
+    
+    try:
+        # Install dependencies
+        print("Installing dependencies...")
+        subprocess.run(['pnpm', 'install'], check=True)
+        
+        # Run the build command
+        print("Building the project...")
+        result = subprocess.run(['pnpm', 'run', 'build:static'], check=True)
+        
+        # Copy built files to temporary HTML file
+        print("Build completed successfully!")
+        
+        # Read the built HTML file
+        dist_html = repo / 'dist' / 'index.html'
+        if dist_html.exists():
+            with open(dist_html, 'r') as f:
+                html_content = f.read()
+            
+            # Create a temporary HTML file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as f:
+                f.write(html_content)
+                temp_path = f.name
+            
+            # Open in browser
+            webbrowser.open('file://' + os.path.abspath(temp_path))
+            print(f"Visualization opened in browser: file://{os.path.abspath(temp_path)}")
+        else:
+            print(f"Built HTML file not found at {dist_html}")
+        
+        return result.returncode
+
+        
+    except subprocess.CalledProcessError as e:
+        print(f"Build failed with error: {e}")
+        return e.returncode
+    finally:
+        # Return to original directory
+        os.chdir(original_dir)
